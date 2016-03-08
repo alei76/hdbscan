@@ -1,5 +1,7 @@
 package hdbscan;
 import java.util.Comparator;
+import java.util.Map.Entry;
+
 import com.vividsolutions.jts.geom.Coordinate ;
 
 /**

@@ -7,24 +7,16 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.Set;
+import java.util.TreeSet;
+
+import org.jgrapht.graph.DefaultWeightedEdge;
+import org.jgrapht.graph.SimpleWeightedGraph;
+import org.jgrapht.graph.UndirectedWeightedSubgraph;
 
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.GeometryFactory;
 import com.vividsolutions.jts.geom.PrecisionModel;
-
-import edu.princeton.cs.algorithms.EdgeWeightedGraph;
-import edu.princeton.cs.algorithms.BoruvkaMST;
-import edu.princeton.cs.algorithms.Edge;
-
-import org.jgrapht.*;
-import org.jgrapht.alg.KruskalMinimumSpanningTree;
-import org.jgrapht.alg.PrimMinimumSpanningTree;
-import org.jgrapht.graph.DefaultWeightedEdge;
-import org.jgrapht.graph.SimpleWeightedGraph;
-
 
 public class HDBSCAN {
 	
@@ -35,128 +27,44 @@ public class HDBSCAN {
 		
 	}
 	
-	@SuppressWarnings({ "unchecked", "rawtypes" })
-	public static EdgeWeightedGraph calculateWeightedGraph(ArrayList<KdNode> nodes){
-		HashSet<MutualReachabilityEdge> mrEdges = new HashSet();
-		int numNodes = nodes.size();
-		long startTime = System.currentTimeMillis();
-		startTime = System.currentTimeMillis();
-		for(KdNode node : nodes){
-//			if(!node.hasKNeighbors()){
-//			System.out.println(node.getLabel());
-//			System.out.println(node.getNeighbors().size());
-//			System.out.println(node.getCoreDistance());
-//			System.out.println(node.getNeighbors().values());
-//			}
-
-			
-			for(KdNode other : node.getNeighbors().values()){
-				if(node != null && other != null){
-					MutualReachabilityEdge mrEdge = new MutualReachabilityEdge(node, other);
-					mrEdges.add(mrEdge);
-				}
-			}
-		}
-		System.out.println("Time compute edges: " + (System.currentTimeMillis() - startTime));
-		startTime = System.currentTimeMillis();
-		nodes = null;
-		EdgeWeightedGraph ewg = new EdgeWeightedGraph(numNodes);
-		for(MutualReachabilityEdge e : mrEdges){
-			ewg.addEdge(new Edge(e.getLabel1(),e.getLabel2(),e.getMrDistance()));
-		}
-		System.out.println("Time add edges to ewg: " + (System.currentTimeMillis() - startTime));
-//		System.out.println(ewg.toString());
-		return ewg;
-		
-	}
 	
-	public static SimpleWeightedGraph<KdNode, DefaultWeightedEdge> calculateSimpleWeightedGraph(ArrayList<KdNode> nodes){
-		SimpleWeightedGraph<KdNode,DefaultWeightedEdge> swg = new SimpleWeightedGraph<>(DefaultWeightedEdge.class);
+	
+	public static SimpleWeightedGraph<ClusterNode, DefaultWeightedEdge> calculateMST(NearestKdTree kdTree){
+		SimpleWeightedGraph<ClusterNode,DefaultWeightedEdge> swg = new SimpleWeightedGraph(DefaultWeightedEdge.class);
 		HashSet<MutualReachabilityEdge> mrEdges = new HashSet();
-		long startTime = System.currentTimeMillis();
-		int sumNeighbors = 0;
-		int count = 0;
-		for(KdNode node : nodes){
-			if(!node.hasKNeighbors()){
-			sumNeighbors += node.getNeighbors().size();
-			count += 1;
-//			System.out.println(node.getLabel());
-//			System.out.println(node.getNeighbors().size());
-//			System.out.println(node.getCoreDistance());
-//			System.out.println(node.getNeighbors().values());
-			}
+		TreeSet<KdNode> nodes = new TreeSet(kdTree.getAllNodes());
+		KdNode currNode = nodes.pollLast();
+		ClusterNode v1 = new ClusterNode(currNode);
+		swg.addVertex(v1);
+		ClusterNode prevNode = v1;
+		
+		while(nodes.size() > 0){
+			currNode.calculatePotentialEdgeFromNeighbors(nodes);
 
-			swg.addVertex(node);
-			
-			for(KdNode other : node.getNeighbors().values()){
-				if(node != null && other != null){
-					MutualReachabilityEdge mrEdge = new MutualReachabilityEdge(node, other);
-					mrEdges.add(mrEdge);
+			if(currNode.getCurrEdge() == null){
+				currNode.setBboxDistance(currNode.getCoreDistance());
+
+				while(currNode.getCurrEdge() == null){
+					currNode.calculateBBox();
+
+					if(currNode.getIntervals().last().equals(currNode.getBboxDistance())){
+						NearestKdTree.queryNode(kdTree.getRoot(), currNode, kdTree.getTreeBBox(), nodes);
+					}
+					NearestKdTree.queryNode(kdTree.getRoot(), currNode, currNode.getBbox(), nodes);
 				}
 			}
+			ClusterNode v2 = new ClusterNode(currNode.getCurrEdge());
+			swg.addVertex(v2);
+			DefaultWeightedEdge e = swg.addEdge(prevNode,v2);
+			swg.setEdgeWeight(e, currNode.getCurrEdgeWeight());
+			currNode = currNode.getCurrEdge();
+			prevNode = v2;
+			nodes.remove(currNode);
 		}
-//		System.out.println("Average neighbors LT K: " + sumNeighbors / count);
-		for(MutualReachabilityEdge e : mrEdges){
-			DefaultWeightedEdge we = swg.addEdge(e.getNode1(),e.getNode2());
-			if(we != null){
-				swg.setEdgeWeight(we, e.getMrDistance());
-			}
-		}
-		System.out.println("Time add edges to swg: " + (System.currentTimeMillis() - startTime));
+
 		return swg;
 	}
 	
-	
-	
-	public static BoruvkaMST createMST(EdgeWeightedGraph ewg){
-		return new BoruvkaMST(ewg);
-	}
-	
-	public static SimpleWeightedGraph<KdNode, DefaultWeightedEdge> calculateMST(SimpleWeightedGraph<KdNode, 
-			DefaultWeightedEdge> graph){
-		PrimMinimumSpanningTree<KdNode, DefaultWeightedEdge> mstFinder = new PrimMinimumSpanningTree<KdNode, DefaultWeightedEdge>(
-	            graph);
-
-	    Set<DefaultWeightedEdge> mstEdges = mstFinder.getMinimumSpanningTreeEdgeSet();
-	    SimpleWeightedGraph<KdNode, DefaultWeightedEdge> mst = new SimpleWeightedGraph<KdNode, DefaultWeightedEdge>(
-	            DefaultWeightedEdge.class);
-
-	    for (KdNode mv : graph.vertexSet()) {
-	        mst.addVertex(mv);
-	    }
-
-	    for (DefaultWeightedEdge e : mstEdges) {
-	        mst.addEdge(graph.getEdgeSource(e), graph.getEdgeTarget(e));
-	        mst.setEdgeWeight(e, graph.getEdgeWeight(e));
-	    }
-
-	    return mst;
-	}
-	
-	public static void createMstWKT(BoruvkaMST mst,ArrayList<KdNode> nodes){
-		GeometryFactory gf = new GeometryFactory(new PrecisionModel(),4326);
-		try{
-			File file = new File("testWkt.csv");
-			if (!file.exists()) {
-				file.createNewFile();
-			}
-			FileWriter fw = new FileWriter(file.getAbsoluteFile());
-			BufferedWriter bw = new BufferedWriter(fw);
-			bw.write("v1,v2,weight,wkt");
-			for(Edge e : mst.edges()){
-				int v1 = e.either();
-				int v2 = e.other(v1);
-				Coordinate point1 = nodes.get(v1).getCoordinate();
-				Coordinate point2 = nodes.get(v2).getCoordinate();
-				Coordinate[] coords = {point1,point2};
-				bw.write("\n\"" + v1 + "\"" + "," + "\"" + v2 + "\"" + "," +
-						"\"" + e.weight() + "\"" + "," +"\"" + gf.createLineString(coords) + "\"");
-			}
-			bw.close();
-		}catch(IOException e){
-			e.printStackTrace();
-		}
-	}
 	
 	public static void createKmstWKT(SimpleWeightedGraph<KdNode, DefaultWeightedEdge> kmst){
 		GeometryFactory gf = new GeometryFactory(new PrecisionModel(),4326);
@@ -177,6 +85,32 @@ public class HDBSCAN {
 				Coordinate[] coords = {point1,point2};
 				bw.write("\n\"" + node1.getLabel() + "\"" + "," + "\"" + node2.getLabel() + "\"" + "," +
 						"\"" + kmst.getEdgeWeight(e) + "\"" + "," +"\"" + gf.createLineString(coords) + "\"");
+			}
+			bw.close();
+		}catch(IOException e){
+			e.printStackTrace();
+		}
+	}
+	
+	public static void createClusterWKT(SimpleWeightedGraph<ClusterNode, DefaultWeightedEdge> clusterGraph){
+		GeometryFactory gf = new GeometryFactory(new PrecisionModel(),4326);
+		
+		try{
+			File file = new File("testClusterWkt.csv");
+			if (!file.exists()) {
+				file.createNewFile();
+			}
+			FileWriter fw = new FileWriter(file.getAbsoluteFile());
+			BufferedWriter bw = new BufferedWriter(fw);
+			bw.write("v1,v2,weight,wkt");
+			for(DefaultWeightedEdge e : clusterGraph.edgeSet()){
+				ClusterNode node1 = clusterGraph.getEdgeSource(e);
+				ClusterNode node2 = clusterGraph.getEdgeTarget(e);
+				Coordinate point1 =node1.getCoord();
+				Coordinate point2 = node2.getCoord();
+				Coordinate[] coords = {point1,point2};
+				bw.write("\n\"" + node1.getCluster().getLabel() + "\"" + "," + "\"" + node2.getCluster().getLabel() + "\"" + "," +
+						"\"" + clusterGraph.getEdgeWeight(e) + "\"" + "," +"\"" + gf.createLineString(coords) + "\"");
 			}
 			bw.close();
 		}catch(IOException e){
@@ -235,26 +169,31 @@ public class HDBSCAN {
 	}
 	 public static void main(String[] args) {
 		try{
-			Coordinate[] data = readInDataSet("testData.csv", ",");
+			Coordinate[] data = readInDataSet("data/testData.csv", ",");
 			long startTime = System.currentTimeMillis();
 			NearestKdTree tree = calculateNearestKdTree(data, 32, 0.001);
 			System.out.println("Time to calculate NN: " + (System.currentTimeMillis() - startTime));
 			startTime = System.currentTimeMillis();
-			ArrayList<KdNode> nodes = tree.getAllNodes();
-			Collections.sort(nodes);
-			EdgeWeightedGraph ewg = calculateWeightedGraph(nodes);
-			System.out.println("Time to create Edge Weighted Graph: " + (System.currentTimeMillis() - startTime));
+			SimpleWeightedGraph<ClusterNode, DefaultWeightedEdge> kmst = calculateMST(tree);
+			System.out.println("Time add edges to create Minimum Spanning Tree: " + (System.currentTimeMillis() - startTime));
 			startTime = System.currentTimeMillis();
-			BoruvkaMST mst = new BoruvkaMST(ewg);
-			System.out.println("Time to create Minimum Spanning Tree: " + (System.currentTimeMillis() - startTime));
-			SimpleWeightedGraph<KdNode, DefaultWeightedEdge> swg = calculateSimpleWeightedGraph(nodes);
+			Double maxWeight = 0.0;
+			for(DefaultWeightedEdge e : kmst.edgeSet()){
+				Double currWeight = kmst.getEdgeWeight(e);
+				if(currWeight > maxWeight){
+					maxWeight = currWeight;
+				}
+			}
+			Cluster rootCluster = new Cluster(null,maxWeight,32,new UndirectedWeightedSubgraph<>(kmst, null, null));
+			ClusterHeirarchy ch = new ClusterHeirarchy(rootCluster);
+			System.out.println("Build root cluster and init heirarchy: " + (System.currentTimeMillis() - startTime));
 			startTime = System.currentTimeMillis();
-			SimpleWeightedGraph<KdNode, DefaultWeightedEdge> kmst = calculateMST(swg) ;
-			System.out.println("Time to create Minimum Spanning Tree: " + (System.currentTimeMillis() - startTime));
-			startTime = System.currentTimeMillis();
-//			createMstWKT(mst,nodes);
-			createKmstWKT(kmst);
+			ch.makeHeirarchy();
+			System.out.println("Make Heirarchy:" + (System.currentTimeMillis() - startTime));
+			createClusterWKT(kmst);
 			System.out.println("Write MST to WKT: " + (System.currentTimeMillis() - startTime));
+			startTime = System.currentTimeMillis();
+			
 
 		}catch(IOException e){
 			System.out.println(e);

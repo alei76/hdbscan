@@ -2,10 +2,8 @@ package hdbscan;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
-import java.util.ListIterator;
+import java.util.Set;
 import java.util.TreeSet;
-import java.util.Iterator;
 
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Envelope;
@@ -82,15 +80,15 @@ public class NearestKdTree{
 	  }
 	  
 
-		private void queryNode(KdNode currentNode, KdNode bottomNode,
-				Envelope queryEnv, boolean odd, List<KdNode> result) {
-			if (currentNode == bottomNode)
+		public static void queryNode(KdNode currentNode, KdNode searchNode,
+				Envelope queryEnv) {
+			if (currentNode == null)
 				return;
 
 			double min;
 			double max;
 			double discriminant;
-			if (odd) {
+			if (currentNode.getAxis()==0) {
 				min = queryEnv.getMinX();
 				max = queryEnv.getMaxX();
 				discriminant = currentNode.getX();
@@ -103,16 +101,85 @@ public class NearestKdTree{
 			boolean searchRight = discriminant <= max;
 
 			if (searchLeft) {
-				queryNode(currentNode.getLeft(), bottomNode, queryEnv, !odd, result);
+				queryNode(currentNode.getLeft(), searchNode, queryEnv);
 			}
-			if (queryEnv.contains(currentNode.getCoordinate())) {
-				result.add(currentNode);
+			if (!currentNode.equals(searchNode) && queryEnv.contains(currentNode.getCoordinate())) {
+				Double distance = searchNode.addNeighbor(currentNode);
+				if(distance != null){
+					currentNode.addNeighbor(searchNode,distance);
+				}
+				
 			}
 			if (searchRight) {
-				queryNode(currentNode.getRight(), bottomNode, queryEnv, !odd, result);
+				queryNode(currentNode.getRight(), searchNode, queryEnv);
 			}
 
 		}
+		
+		private static void queryNode(KdNode currentNode, KdNode searchNode, Envelope queryEnv, Envelope prevEnv) {
+			if (currentNode == null)
+				return;
+
+			double min;
+			double max;
+			double discriminant;
+			if (currentNode.getAxis()==0) {
+				min = queryEnv.getMinX();
+				max = queryEnv.getMaxX();
+				discriminant = currentNode.getX();
+			} else {
+				min = queryEnv.getMinY();
+				max = queryEnv.getMaxY();
+				discriminant = currentNode.getY();
+			}
+			boolean searchLeft = min < discriminant;
+			boolean searchRight = discriminant <= max;
+
+			if (searchLeft) {
+				queryNode(currentNode.getLeft(),searchNode, queryEnv, prevEnv);
+			}
+			if (!currentNode.equals(searchNode) && queryEnv.contains(currentNode.getCoordinate()) && 
+					!prevEnv.contains(currentNode.getCoordinate())) {
+				searchNode.addNeighbor(currentNode);
+			}
+			if (searchRight) {
+				queryNode(currentNode.getRight(),searchNode, queryEnv,prevEnv);
+			}
+
+		}
+		
+		public static void queryNode(KdNode currentNode, KdNode searchNode, Envelope queryEnv, Set<KdNode> potentialVertices) {
+			if (currentNode == null)
+				return;
+
+			double min;
+			double max;
+			double discriminant;
+			if (currentNode.getAxis()==0) {
+				min = queryEnv.getMinX();
+				max = queryEnv.getMaxX();
+				discriminant = currentNode.getX();
+			} else {
+				min = queryEnv.getMinY();
+				max = queryEnv.getMaxY();
+				discriminant = currentNode.getY();
+			}
+			boolean searchLeft = min < discriminant;
+			boolean searchRight = discriminant <= max;
+
+			if (searchLeft) {
+				queryNode(currentNode.getLeft(),searchNode, queryEnv, potentialVertices);
+			}
+			if (!currentNode.equals(searchNode) && queryEnv.contains(currentNode.getCoordinate()) && 
+					potentialVertices.contains(currentNode)) {
+				searchNode.checkPotentialEdge(currentNode);
+			}
+			if (searchRight) {
+				queryNode(currentNode.getRight(),searchNode, queryEnv,potentialVertices);
+			}
+
+		}
+		
 
 		/**
 		 * Performs a range search of the points in the index.
@@ -121,39 +188,37 @@ public class NearestKdTree{
 		 *          the range rectangle to query
 		 * @return a list of the KdNodes found
 		 */
-		public ArrayList<KdNode> query(Envelope queryEnv) {
-			ArrayList<KdNode> result = new ArrayList<KdNode>();
-			queryNode(root, last, queryEnv, true, result);
-			return result;
-		}
+		public static void query(KdNode currentNode, Envelope queryEnv, ArrayListVisitor v) {
+			if (currentNode == null)
+				return;
 
-		/**
-		 * Performs a range search of the points in the index.
-		 * 
-		 * @param queryEnv
-		 *          the range rectangle to query
-		 * @param result
-		 *          a list to accumulate the result nodes into
-		 */
-		public void query(Envelope queryEnv, List<KdNode> result) {
-			queryNode(root, last, queryEnv, true, result);
-		}
+			double min;
+			double max;
+			double discriminant;
+			if (currentNode.getAxis()==0) {
+				min = queryEnv.getMinX();
+				max = queryEnv.getMaxX();
+				discriminant = currentNode.getX();
+			} else {
+				min = queryEnv.getMinY();
+				max = queryEnv.getMaxY();
+				discriminant = currentNode.getY();
+			}
+			boolean searchLeft = min < discriminant;
+			boolean searchRight = discriminant <= max;
 
-	/**
-	 * Performs a range search on the envelope and visits each of the 
-	 * results.
-	 * 
-	 * @param searchEnv the envelope to search
-	 * @param visitor the {@link ItemVisitor} which should visit each result.
-	 */
-	public void query(Envelope searchEnv, ItemVisitor visitor) {
-		List<KdNode> results = query(searchEnv) ; 
-		Iterator<KdNode> visitator = results.iterator() ; 
-		while (visitator.hasNext()) { 
-			visitor.visitItem(visitator.next()) ; 
-		}		
-	}
+			if (searchLeft) {
+				query(currentNode.getLeft(),queryEnv, v);
+			}
+			if (queryEnv.contains(currentNode.getCoordinate())) {
+				v.visitItem(currentNode);
+			}
+			if (searchRight) {
+				query(currentNode.getRight(),queryEnv, v);
+			}
+		}
 	
+		
 	
 	/**
 	 * Returns the path through the tree (all the way to the leaf node) caused 
@@ -171,36 +236,6 @@ public class NearestKdTree{
 		return v.getItems() ; 
 	}
 	
-	/**
-	 * Searches the tree for the provided point. Terminates when the point
-	 * is found.
-	 * @param p The point to find
-	 * @return true if the point is in the tree.
-	 */
-//	public boolean contains(Coordinate p) { 
-//		return traverseFind(getRoot(), p) ; 
-//	}
-	
-	/**
-	 * Returns the path from the root node to the specified coordinate.
-	 * @param p coordinate to search for
-	 * @return list of KdNodes in order of traversal.
-	 */
-	public ArrayList<KdNode> coordinatePath(Coordinate p) { 
-		ArrayList<KdNode> leafPath = path(p) ; 
-		ListIterator<KdNode> popper = leafPath.listIterator(leafPath.size()) ; 
-		
-		boolean found = false; 
-		while (popper.hasPrevious() && !found) { 
-			KdNode node = (KdNode)(popper.previous()) ;
-			found = node.getCoordinate().equals2D(p) ; 
-			if (!found) { 
-				popper.remove() ; 
-			}
-		}
-		
-		return leafPath ; 		
-	}
 	
 	/**
 	 * Traverses the tree structure in search of the coordinate p, starting 
@@ -301,56 +336,31 @@ public class NearestKdTree{
 	}
 	
 	/**
-	 * Searches for the nearest neighbor to the indicated point, excluding from
-	 * consideration all points listed in the exclude collection. (Recursive)
-	 * @param start location in the tree to start searching.
-	 * @param searchPt point to search for
-	 * @param exclude collection of points which cannot be the nearest neighbor.
-	 * @return search point, nearest neighbor, and separation distance.
+	 * Searches for K nearest neighbors for all Nodes in the graph.
 	 */
 	@SuppressWarnings("unchecked")
 	public void findKNN() {
 		ArrayList<KdNode> path;
 		for(KdNode node : getAllNodes()){
-			
-			boolean envQuery = node.hasKNeighbors();
-			if(node.hasKNeighbors()){
-				node.calculateBBox();
-				path = query(node.getBbox());
-			}else{
-				ArrayListVisitor v = new ArrayListVisitor();
-				traverse(root,node,v);
-				path = v.getItems();
+			ArrayListVisitor v = new ArrayListVisitor();
+			traverse(root,node,v);
+			path = v.getItems();
+			for(int i=0; i<path.size();i++){
+				node.addInterval(path.get(i));
 			}
-			ListIterator<KdNode> unwind = path.listIterator(path.size()) ; 
-			while (unwind.hasPrevious()) {
-				KdNode current = (unwind.previous());
-				if(!node.equals(current)){
-					Double addCurrentDistance = node.addNeighbor(current);
-					if(addCurrentDistance != null){
-						current.addNeighbor(node,addCurrentDistance);
+//			System.out.println(node);
+			while(!node.hasKNeighbors() || node.getBboxDistance() < node.getCoreDistance()){
+//				System.out.println(node + " " + node.getBboxDistance() + " " + node.getBbox() + " " + node.getCoreDistance());
+				if(node.getBboxDistance().equals(node.getIntervals().last())){
+					path = this.getAllNodes();
+				}else{
+					node.calculateBBox();
+					if(node.getPrevBbox() != null && node.getPrevBbox()!= node.getBbox()){
+						queryNode(root,node,node.getBbox(),node.getPrevBbox());
 					}else{
-						current.addNeighbor(node);
+						queryNode(root,node,node.getBbox());
 					}
 				}
-			}
-			
-			if(!envQuery){
-				node.calculateBBox();
-				path = query(node.getBbox());
-				unwind = path.listIterator(path.size()) ; 
-				while (unwind.hasPrevious()) {
-					KdNode current = (unwind.previous());
-					if(!node.equals(current)){
-						Double addCurrentDistance = node.addNeighbor(current);
-						if(addCurrentDistance != null){
-							current.addNeighbor(node,addCurrentDistance);
-						}else{
-							current.addNeighbor(node);
-						}
-					}
-				}
-
 			}
 		}
 	}
@@ -358,6 +368,14 @@ public class NearestKdTree{
 	
 	public KdNode getRoot() {
 		return root;
+	}
+
+	public Envelope getTreeBBox() {
+		return treeBBox;
+	}
+
+	public void setTreeBBox(Envelope treeBBox) {
+		this.treeBBox = treeBBox;
 	}
 
 	public void setRoot(KdNode root) {
@@ -389,9 +407,9 @@ public class NearestKdTree{
 	}
 	
 	public ArrayList<KdNode> getAllNodes(){
-		ArrayList<KdNode> visitor = new ArrayList<KdNode>();
-		query(treeBBox,visitor);
-		return visitor;
+		ArrayListVisitor visitor = new ArrayListVisitor();
+		query(root,treeBBox,visitor);
+		return visitor.getItems();
 	}
 
 	/**

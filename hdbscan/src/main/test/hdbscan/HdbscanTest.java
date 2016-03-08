@@ -38,7 +38,7 @@ public class HdbscanTest {
 	@Test
 	public void testKNN() {
 		try {
-			Coordinate[] data = HDBSCAN.readInDataSet("example_data_set.csv", ",");
+			Coordinate[] data = HDBSCAN.readInDataSet("data/example_data_set.csv", ",");
 			KdNode[] nodeArray = simpleKNN(data,10);
 			NearestKdTree tree = HDBSCAN.calculateNearestKdTree(data, 10, 0.001);
 			ArrayList<KdNode> treeArray = tree.getAllNodes();

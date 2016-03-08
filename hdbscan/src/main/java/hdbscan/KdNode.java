@@ -1,15 +1,17 @@
 package hdbscan;
 
 import java.util.Arrays;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Envelope;
 
 /**
- * A node of a {@link KdTree}, which represents one or more points in the same location.
+ * A node of a {@link KdTree}
  * 
- * @author dskea
+ * @author Damien Manier
  */
 public class KdNode implements Comparable<KdNode> {
 
@@ -18,16 +20,19 @@ public class KdNode implements Comparable<KdNode> {
     private KdNode right;
     private KdNode parent;
     private Integer axis;
-    private Integer count;
     private Double coreDistance;
     private Double bboxDistance; 
 	private Integer label;
 	private TreeMap<Double, KdNode> neighbors;
+	private KdNode currEdge;
+	private Double currEdgeWeight;
+	TreeSet<Double> intervals;
 	private Integer k;
 	private static int nodeCount = 0;
 
 
 	private Envelope bbox;
+	private Envelope prevBbox;
 	private boolean hasKNeighbors;
 
     /**
@@ -41,15 +46,18 @@ public class KdNode implements Comparable<KdNode> {
         p = new Coordinate(_x, _y);
         left = null;
         right = null;
-        count = 1;
         this.label = nodeCount;
         nodeCount += 1;
         this.k = k;
         this.axis = axis;
+        this.hasKNeighbors = false;
 		this.coreDistance = Double.MAX_VALUE;
+		this.bboxDistance = Double.MIN_VALUE;
 		this.neighbors = new TreeMap();
+		intervals = new TreeSet();
 		
 		bbox = new Envelope(p,p);
+		prevBbox = null;
     }
 
     /**
@@ -62,16 +70,19 @@ public class KdNode implements Comparable<KdNode> {
         this.p = new Coordinate(p);
         left = null;
         right = null;
-        count = 1;
         
         this.label = nodeCount;
         nodeCount += 1;
         this.k = k;
         this.axis = axis;
+        this.hasKNeighbors = false;
 		this.coreDistance = Double.MAX_VALUE;
+		this.bboxDistance = Double.MIN_VALUE;
 		this.neighbors = new TreeMap();
+		intervals = new TreeSet();
 		
 		bbox = new Envelope(p,p);
+		prevBbox = null;
     }
     
     public void calculateBBox(Double dist){
@@ -104,6 +115,7 @@ public class KdNode implements Comparable<KdNode> {
 				minLon = MIN_LON;
 				maxLon = MAX_LON;
 			}
+	    	prevBbox = bbox;
 	    	bbox.expandToInclude(Math.toDegrees(minLon), Math.toDegrees(minLat));
 	    	bbox.expandToInclude(Math.toDegrees(maxLon), Math.toDegrees(maxLat));
     	}
@@ -111,18 +123,27 @@ public class KdNode implements Comparable<KdNode> {
     }
     
     public void calculateBBox(){
-    	Double dist = calculateMedianDistance();
-    	calculateBBox(dist);
+    	if(bboxDistance != intervals.last()){
+    		bboxDistance = calculateMinDistance();
+    		if(bboxDistance != null){
+    			calculateBBox(bboxDistance);
+    		}
+    	}
     }
     
-    public Double calculateMinDistance(){
-    	if(neighbors.size() < 1){
-    		return null;
-    	}
+    public Double getBboxDistance() {
+		return bboxDistance;
+	}
+    
+    public void setBboxDistance(Double bboxDistance){
+    	this.bboxDistance = bboxDistance;
+    }
+
+	public Double calculateMinDistance(){
     	if(bboxDistance != null){
-    		return neighbors.higherKey(bboxDistance);
+    		return intervals.higher(bboxDistance);
     	}else{
-    		return neighbors.firstKey();
+    		return intervals.first();
     	}
     }
     
@@ -193,6 +214,36 @@ public class KdNode implements Comparable<KdNode> {
 			return retDistance;
 		} else return null;
     }
+    
+    public void addInterval(KdNode other){
+    	if(!this.equals(other)){
+	    	Double distance = computeDistance(this.p, other.p);
+	    	intervals.add(distance);
+	    	addNeighbor(other,distance);
+	    	other.addNeighbor(this, distance);
+    	}
+    }
+    
+    public void calculatePotentialEdgeFromNeighbors(Set<KdNode> potentialVertices){
+    	for(Double dist : neighbors.keySet()){
+    		KdNode compareNode = neighbors.get(dist);
+    		if(potentialVertices.contains(compareNode) && (currEdgeWeight == null || (dist < currEdgeWeight && 
+    				compareNode.getCoreDistance() < currEdgeWeight))){
+    			currEdgeWeight = dist;
+    			currEdge = compareNode;
+    		}
+    	}
+    }
+    
+    public void checkPotentialEdge(KdNode other){
+    	Double dist = computeDistance(this.p, other.p);
+    	if(currEdgeWeight == null || (dist < currEdgeWeight && 
+				other.getCoreDistance() < currEdgeWeight)){
+			currEdgeWeight = dist;
+			currEdge = other;
+		}
+    }
+    
     
     public double computeDistance(Coordinate point1, Coordinate point2){
 		final int R = 6371; // Radius of the earth
@@ -301,6 +352,20 @@ public class KdNode implements Comparable<KdNode> {
 		return neighbors;
 	}
 	
+	
+	
+	public KdNode getCurrEdge() {
+		return currEdge;
+	}
+
+	public Double getCurrEdgeWeight() {
+		return currEdgeWeight;
+	}
+
+	public TreeSet<Double> getIntervals() {
+		return intervals;
+	}
+
 	public int getK() {
 		return k;
 	}
@@ -322,25 +387,15 @@ public class KdNode implements Comparable<KdNode> {
     public KdNode getRight() {
         return right;
     }
-
-    // Increments counts of points at this location
-    void increment() {
-        count = count + 1;
-    }
-
-    /**
-     * Returns the number of inserted points that are coincident at this location.
-     * 
-     * @return number of inserted points that this node represents
-     */
-    public int getCount() {
-        return count;
-    }
-
+    
     public Envelope getBbox() {
 		return bbox;
 	}
 
+
+	public Envelope getPrevBbox() {
+		return prevBbox;
+	}
 
 	public boolean hasKNeighbors() {
 		return hasKNeighbors;
@@ -349,15 +404,6 @@ public class KdNode implements Comparable<KdNode> {
 	public boolean isBottom(){
 		return (left == null && right == null);
 	}
-
-	/**
-     * Tests whether more than one point with this value have been inserted (up to the tolerance)
-     * 
-     * @return true if more than one point have been inserted with this value
-     */
-    public boolean isRepeated() {
-        return count > 1;
-    }
 
     // Sets left node value
     public void setLeft(KdNode _left) {
@@ -410,6 +456,6 @@ public class KdNode implements Comparable<KdNode> {
 
 	@Override
 	public int compareTo(KdNode other) {
-		return this.label < other.label ? -1 : (this.label > other.label ? 1 : 0);
+		return this.coreDistance < other.coreDistance ? -1 : (this.coreDistance > other.coreDistance ? 1 : 0);
 	}
 }

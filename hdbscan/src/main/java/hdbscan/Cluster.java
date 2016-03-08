@@ -1,32 +1,35 @@
 package hdbscan;
 
-import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Set;
+
+import org.jgrapht.alg.ConnectivityInspector;
+import org.jgrapht.graph.DefaultWeightedEdge;
+import org.jgrapht.graph.UndirectedWeightedSubgraph;
 
 
-/**
- * An HDBSCAN* cluster, which will have a birth level, death level, stability, and constraint 
- * satisfaction once fully constructed.
- * @author zjullion
- */
 public class Cluster {
 
 	// ------------------------------ PRIVATE VARIABLES ------------------------------
 	
 	private int label;
-	private double birthLevel;
-	private int numPoints;
+	private Double birthLevel;
+	private Double deathLevel;
+	private Double lowestDeathLevel;
+	private int minClSize;
 	
-	private double stability;
-	private double propagatedStability;
+	private UndirectedWeightedSubgraph<ClusterNode, DefaultWeightedEdge> graph;
+	
+	private Double stability;
 
 	private Cluster parent;
+	private Cluster left;
+	private Cluster right;
 	private boolean hasChildren;
-	public ArrayList<Cluster> propagatedDescendants;
+	private static int clusterCount = 0;
 	
 
-	// ------------------------------ CONSTANTS ------------------------------
 
-	// ------------------------------ CONSTRUCTORS ------------------------------
 	
 	/**
 	 * Creates a new Cluster.
@@ -35,72 +38,79 @@ public class Cluster {
 	 * @param birthLevel The MST edge level at which this cluster first appeared
 	 * @param numPoints The initial number of points in this cluster
 	 */
-	public Cluster(int label, Cluster parent, double birthLevel, int numPoints) {
-		this.label = label;
+	public Cluster(Cluster parent, Double birthLevel, int minClSize,
+			UndirectedWeightedSubgraph<ClusterNode, DefaultWeightedEdge> graph) {
+		clusterCount += 1;
+		this.graph = graph;
+		this.label = clusterCount;
 		this.birthLevel = birthLevel;
-		this.numPoints = numPoints;
+		this.deathLevel = null;
+		this.minClSize = minClSize;
 		
-		this.stability = 0;
-		this.propagatedStability = 0;
+		this.stability = 0.0;
 		
 		this.parent = parent;
-		if (this.parent != null)
-			this.parent.hasChildren = true;
 		this.hasChildren = false;
-		this.propagatedDescendants = new ArrayList<Cluster>(1);
-	}
-	
-
-	// ------------------------------ PUBLIC METHODS ------------------------------
-	
-	/**
-	 * Removes the specified number of points from this cluster at the given edge level, which will
-	 * update the stability of this cluster and potentially cause cluster death.  If cluster death
-	 * occurs, the number of constraints satisfied by the virtual child cluster will also be calculated.
-	 * @param numPoints The number of points to remove from the cluster
-	 * @param level The MST edge level at which to remove these points
-	 */
-	public void detachPoints(int numPoints, double level) {
-		this.numPoints-=numPoints;
-		this.stability+=(numPoints * (1/level - 1/this.birthLevel));
+		this.left = null;
+		this.right = null;
 		
-		if (this.numPoints < 0)
-			throw new IllegalStateException("Cluster cannot have less than 0 points.");
+		labelVertices();
 	}
 	
-
-	/**
-	 * This cluster will propagate itself to its parent if its number of satisfied constraints is
-	 * higher than the number of propagated constraints.  Otherwise, this cluster propagates its
-	 * propagated descendants.  In the case of ties, stability is examined.
-	 * Additionally, this cluster propagates the lowest death level of any of its descendants to its
-	 * parent.
-	 */
-	public void propagate() {
-		if (this.parent != null) {
-			
-			//If this cluster has no children, it must propagate itself:
-			if (!this.hasChildren) {
-				this.parent.propagatedStability+= this.stability;
-				this.parent.propagatedDescendants.add(this);
-			}
-			else{
-				//Chose the parent over descendants if there is a tie in stability:
-				if (this.stability >= this.propagatedStability) {
-					this.parent.propagatedStability+= this.stability;
-					this.parent.propagatedDescendants.add(this);
-				}
-				else {
-					this.parent.propagatedStability+= this.propagatedStability;
-					this.parent.propagatedDescendants.addAll(this.propagatedDescendants);
-				}	
-			}	
+	public void labelVertices(){
+		for(ClusterNode node : graph.vertexSet()){
+			node.setCluster(this);
 		}
 	}
 	
-	// ------------------------------ PRIVATE METHODS ------------------------------
+	public void labelVertices(Cluster cluster){
+		for(ClusterNode node : graph.vertexSet()){
+			node.setCluster(cluster);
+		}
+	}
+	
+	public Double analyzeCluster(){
+		EdgeComparator ec = new EdgeComparator(graph);
+		UndirectedWeightedSubgraph<ClusterNode, DefaultWeightedEdge> subGraph = 
+				new UndirectedWeightedSubgraph(graph,null,null);
+		DefaultWeightedEdge[] sortedEdges = new DefaultWeightedEdge[graph.edgeSet().size()];
+		graph.edgeSet().toArray(sortedEdges);
+		Arrays.sort(sortedEdges,ec);
+		for(int i = sortedEdges.length -1; i >= 0 && deathLevel == null; i--){
+			Double currEdgeWeight = graph.getEdgeWeight(sortedEdges[i]);
+			ClusterNode v1 = graph.getEdgeSource(sortedEdges[i]);
+			ClusterNode v2 = graph.getEdgeTarget(sortedEdges[i]);
+			subGraph.removeEdge(sortedEdges[i]);
 
-	// ------------------------------ GETTERS & SETTERS ------------------------------
+			stability += (1/currEdgeWeight - 1/this.birthLevel);
+
+			if(subGraph.degreeOf(v1) < 1){
+				subGraph.removeVertex(v1);
+				
+			}
+			if(subGraph.degreeOf(v2) < 1){
+				subGraph.removeVertex(v2);
+			}
+			if(subGraph.vertexSet().size() < minClSize){
+				deathLevel = currEdgeWeight;
+			}else{
+				ConnectivityInspector<ClusterNode, DefaultWeightedEdge> ci = new ConnectivityInspector<>(subGraph);
+				if(!ci.isGraphConnected()){
+					deathLevel = currEdgeWeight;
+					Set<ClusterNode>leftVertices = ci.connectedSetOf(v1);
+					Set<ClusterNode>rightVertices = ci.connectedSetOf(v2);
+					if(leftVertices.size() >= minClSize && rightVertices.size() >= minClSize){
+						left = new Cluster(this,currEdgeWeight,minClSize,
+								new UndirectedWeightedSubgraph<>(subGraph, ci.connectedSetOf(v1),null));
+						right = new Cluster(this,currEdgeWeight,minClSize,
+								new UndirectedWeightedSubgraph<>(subGraph, ci.connectedSetOf(v2),null));
+						hasChildren = true;
+					}
+				}
+			}
+		}
+		return stability;
+	}
 	
 	public int getLabel() {
 		return this.label;
@@ -110,16 +120,51 @@ public class Cluster {
 		return this.parent;
 	}
 	
-	public double getBirthLevel() {
+
+	public Double getDeathLevel() {
+		return deathLevel;
+	}
+
+	public int getMinClSize() {
+		return minClSize;
+	}
+
+	public UndirectedWeightedSubgraph<ClusterNode, DefaultWeightedEdge> getGraph() {
+		return graph;
+	}
+
+	public Cluster getLeft() {
+		return left;
+	}
+
+	public Cluster getRight() {
+		return right;
+	}
+	
+	public void clearChildren(){
+		left = null;
+		right = null;
+		hasChildren = false;
+	}
+
+	public boolean isHasChildren() {
+		return hasChildren;
+	}
+
+	public static int getClusterCount() {
+		return clusterCount;
+	}
+
+	public Double getBirthLevel() {
 		return this.birthLevel;
 	}
 
 	public double getStability() {
 		return this.stability;
 	}
-
-	public ArrayList<Cluster> getPropagatedDescendants() {
-		return this.propagatedDescendants;
+	
+	public void setStability(double stability){
+		this.stability = stability;
 	}
 	
 	public boolean hasChildren() {
